@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Anonymized Edge Surveillance</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0f0f14;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 16px;
+            min-height: 100vh;
+        }
+
+        h2 {
+            font-size: 1.4rem;
+            letter-spacing: 0.08em;
+            color: #c9d1ff;
+            margin-bottom: 18px;
+        }
+
+        /* ── Controls ── */
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+
+        button {
+            padding: 9px 18px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            transition: background 0.2s, opacity 0.2s;
+        }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        #startBtn  { background: #3d7a56; color: #fff; }
+        #startBtn:hover:not(:disabled) { background: #4c9a6c; }
+        #stopBtn   { background: #7a3d3d; color: #fff; }
+        #stopBtn:hover:not(:disabled)  { background: #9a4c4c; }
+
+        /* ── Mode selector ── */
+        .mode-panel {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 14px;
+        }
+
+        .mode-btn {
+            padding: 7px 15px;
+            font-size: 13px;
+            border-radius: 20px;
+            border: 2px solid transparent;
+            background: #252535;
+            color: #aaa;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-btn:hover   { background: #303050; color: #ddd; }
+        .mode-btn.active  { border-color: #7a9cff; color: #7a9cff; background: #1a1a2e; }
+
+        /* ── Status ── */
+        #status {
+            font-size: 13px;
+            font-weight: 600;
+            color: #f5d06a;
+            margin-bottom: 14px;
+            letter-spacing: 0.04em;
+        }
+
+        /* ── Video ── */
+        video {
+            width: 640px;
+            max-width: 100%;
+            background: #000;
+            border: 2px solid #2a2a3a;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        /* ── Messages ── */
+        .log-section { width: 640px; max-width: 100%; }
+
+        .log-section h3 {
+            font-size: 13px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+        }
+
+        #messages {
+            background: #13131e;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 10px 14px;
+            min-height: 90px;
+            max-height: 180px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 12.5px;
+            line-height: 1.6;
+            color: #ccc;
+        }
+
+        #messages .alert  { color: #ff7070; }
+        #messages .info   { color: #70b8ff; }
+        #messages .mode   { color: #90d080; }
+        #messages .recv   { color: #d0d0ff; }
+    </style>
+</head>
+<body>
+    <h2>🔒 Anonymized Edge Surveillance</h2>
+
+    <div class="controls">
+        <button id="startBtn">▶ Démarrer</button>
+        <button id="stopBtn" disabled>■ Arrêter</button>
+    </div>
+
+    <!-- Sélecteur de mode -->
+    <div class="mode-panel" id="modePanel">
+        <button class="mode-btn active" data-mode="blur">🌫 Blur (tous)</button>
+        <button class="mode-btn"        data-mode="selective">👥 Sélectif (whitelist)</button>
+        <button class="mode-btn"        data-mode="heatmap">🌡 Heatmap</button>
+    </div>
+
+    <div id="status">Statut: Déconnecté</div>
+
+    <video id="video" autoplay playsinline></video>
+
+    <div class="log-section">
+        <h3>DataChannel</h3>
+        <div id="messages"></div>
+    </div>
+
+    <script>
+        let pc = null;
+        let dc = null;
+        let currentMode = 'blur';
+
+        const video      = document.getElementById('video');
+        const status     = document.getElementById('status');
+        const messagesDiv= document.getElementById('messages');
+        const startBtn   = document.getElementById('startBtn');
+        const stopBtn    = document.getElementById('stopBtn');
+        const modeBtns   = document.querySelectorAll('.mode-btn');
+
+        // ── Logging ──────────────────────────────────────────────────────────
+        function log(msg, cls = '') {
+            const div = document.createElement('div');
+            if (cls) div.className = cls;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // ── Mode buttons ─────────────────────────────────────────────────────
+        modeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.dataset.mode;
+                if (mode === currentMode) return;
+                setMode(mode);
+            });
+        });
+
+        function setMode(mode) {
+            currentMode = mode;
+            renderModeButtons(mode);
+
+            // Envoyer via DataChannel si connecté
+            if (dc && dc.readyState === 'open') {
+                dc.send(`SET_MODE|${mode}`);
+                log(`→ Mode demandé: ${mode}`, 'mode');
+            }
+        }
+
+        function renderModeButtons(mode) {
+            modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+        }
+
+        // ── Connexion WebRTC ─────────────────────────────────────────────────
+        async function start() {
+            startBtn.disabled = true;
+            status.textContent = 'Statut: Négociation en cours...';
+
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            pc.addEventListener('track', evt => {
+                if (evt.track.kind === 'video') {
+                    video.srcObject = evt.streams[0];
+                    status.textContent = 'Statut: Connecté ✓';
+                    stopBtn.disabled = false;
+                }
+            });
+
+            // DataChannel
+            dc = pc.createDataChannel('chat');
+
+            dc.onopen = () => {
+                log('DataChannel ouvert.', 'info');
+                dc.send('Hello from Browser!');
+                // Envoyer le mode courant au serveur
+                dc.send(`SET_MODE|${currentMode}`);
+            };
+
+            dc.onmessage = evt => {
+                const msg = evt.data;
+                if (msg.startsWith('ALERT|')) {
+                    // Alerte visage inconnu (étape 4)
+                    const parts = msg.split('|');
+                    log(`⚠ ALERTE [${parts[1]}]: ${parts[2]}`, 'alert');
+                } else if (msg.startsWith('MODE_CHANGED|')) {
+                    const mode = msg.split('|')[1];
+                    currentMode = mode;
+                    renderModeButtons(mode);
+                    log(`✓ Mode actif: ${mode}`, 'mode');
+                } else if (msg.startsWith('MODE_ACK|')) {
+                    const mode = msg.split('|')[1];
+                    log(`↩ Mode reçu par serveur: ${mode}`, 'mode');
+                } else {
+                    log(`📥 ${msg}`, 'recv');
+                }
+            };
+
+            pc.addEventListener('iceconnectionstatechange', () => {
+                if (['disconnected','failed'].includes(pc.iceConnectionState)) stop();
+            });
+
+            pc.addTransceiver('video', { direction: 'recvonly' });
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            status.textContent = 'Statut: Collecte ICE...';
+
+            await new Promise(resolve => {
+                if (pc.iceGatheringState === 'complete') { resolve(); return; }
+                const check = () => {
+                    if (pc.iceGatheringState === 'complete') {
+                        pc.removeEventListener('icegatheringstatechange', check);
+                        resolve();
+                    }
+                };
+                pc.addEventListener('icegatheringstatechange', check);
+                setTimeout(() => { pc.removeEventListener('icegatheringstatechange', check); resolve(); }, 2000);
+            });
+
+            status.textContent = 'Statut: Envoi offre SDP...';
+
+            try {
+                const res = await fetch('/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+                });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const answer = await res.json();
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                status.textContent = 'Statut: En attente vidéo...';
+            } catch (err) {
+                status.textContent = `Statut: Erreur — ${err.message}`;
+                log(`Erreur SDP: ${err.message}`, 'alert');
+                startBtn.disabled = false;
+            }
+        }
+
+        function stop() {
+            pc?.close(); pc = null;
+            dc?.close(); dc = null;
+            video.srcObject = null;
+            status.textContent = 'Statut: Déconnecté';
+            startBtn.disabled = false;
+            stopBtn.disabled  = true;
+            log('Connexion fermée.', 'info');
+        }
+
+        startBtn.addEventListener('click', start);
+        stopBtn.addEventListener('click',  stop);
+    </script>
+</body>
+</html>

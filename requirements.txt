@@ -1,3 +1,18 @@
-opencv-python
-mediapipe
-numpy
+# Runtime core
+numpy==1.26.4
+opencv-python==4.10.0.84
+mediapipe==0.10.14
+
+# WebRTC / streaming
+aiohttp==3.9.5
+aiortc==1.9.0
+av==12.3.0
+
+# Face recognition (PyTorch + FaceNet + MTCNN)
+torch==2.4.1
+torchvision==0.19.1
+facenet-pytorch==2.6.0
+
+# Notebook / interactive
+jupyter==1.1.1
+ipython==8.27.0
